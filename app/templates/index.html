@@ -6,15 +6,83 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head><body>
+  <!-- LOGIN SCREEN -->
+<div id="login-screen" class="login-screen active">
+    <div class="login-card">
+
+        <div class="login-brand">
+            <h2>Borrow Board</h2>
+        </div>
+
+        <h1 class="login-heading">Welcome back</h1>
+
+        <p class="login-description">
+            Sign in to access the Borrow Board equipment management system.
+        </p>
+
+        <form id="login-form" class="login-form">
+
+            <label>
+                Username or Email
+                <input
+                    type="text"
+                    id="login-username"
+                    placeholder="Enter username or email"
+                    required
+                >
+            </label>
+
+            <label>
+                Password
+                <input
+                    type="password"
+                    id="login-password"
+                    placeholder="Enter password"
+                    required
+                >
+            </label>
+
+            <p id="login-error" class="login-error"></p>
+
+            <button type="submit">Sign In</button>
+
+        </form>
+
+        <p class="login-footer">
+            Borrow Board | Secure Login
+        </p>
+
+    </div>
+</div>
 <div class="app-shell">
 <aside class="sidebar">
   <div class="brand"><div class="brand-mark">B</div><div><b>borrow<span>board</span></b><small>ALPHA LAB · NIE MYSURU</small></div></div>
   <div class="workspace-label">WORKSPACE</div>
   <nav>
-    <button class="nav-link active" data-view="overview"><span>◫</span> Overview</button>
-    <button class="nav-link" data-view="inventory"><span>▦</span> Equipment inventory</button>
-    <button class="nav-link" data-view="borrowings"><span>⇄</span> Borrowing records</button>
-    <button class="nav-link" data-view="reservations"><span>◷</span> Reservations</button>
+    <nav>
+    <button class="nav-link active" data-view="overview">
+        <span>◫</span> Overview
+    </button>
+
+    <button class="nav-link" data-view="inventory">
+        <span>▦</span> Equipment inventory
+    </button>
+
+    <button class="nav-link" data-view="borrowings">
+        <span>⇄</span> Borrowing records
+    </button>
+
+    <button class="nav-link" data-view="reservations">
+        <span>◷</span> Reservations
+    </button>
+
+    <button class="nav-link " data-view="users">
+        <span>♙</span> Manage Users
+    </button>
+    </nav>
+    <button class="nav-link" id="logout-button">
+    <span>↪</span> Logout
+    </button>
   </nav>
   <div class="sidebar-bottom"><div class="help-card"><div class="help-icon">✦</div><b>Need a hand?</b><p>Contact the ALPHA Lab administrator for equipment support.</p><span>LAB SUPPORT ↗</span></div>
   <div class="profile"><div class="avatar">AL</div><div><b>ALPHA Lab</b><small>Workspace administrator</small></div><span class="online-dot"></span></div></div>
@@ -46,6 +114,48 @@
   <div class="toolbar"><div><h3>Reservation queue</h3><p class="subhead">Requests for equipment that is currently unavailable</p></div><button class="primary-button" onclick="openModal('reserve-modal')">＋ Request equipment</button></div>
   <div class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Reservation</th><th>Borrower ID</th><th>Equipment ID</th><th>Requested</th><th>Priority</th><th>Status</th></tr></thead><tbody id="reservation-table"></tbody></table></div></div>
 </section>
+
+<!-- MANAGE USERS SECTION -->
+<section id="users-view" class="view">
+
+    <div class="toolbar">
+        <div>
+            <h3>User Management</h3>
+            <p class="subhead">Create and manage student and staff accounts.</p>
+        </div>
+
+        <button class="primary-button" onclick="openModal('user-modal')">
+            + Create User Account
+        </button>
+    </div>
+
+    <div class="panel table-panel">
+        <div class="panel-head">
+            <div>
+                <h3>Registered Users</h3>
+                <p>Students and staff registered in Borrow Board</p>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>USN / Staff ID</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+
+                <tbody id="users-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+</section>
+
 <footer>Borrow Board <span>·</span> ALPHA Innovation & Tinkerers Lab <span>·</span> NIE Mysuru <span class="footer-right">Built for responsible equipment sharing</span></footer>
 </main></div>
 
@@ -55,5 +165,66 @@
 <form id="return-form"><label>Transaction ID<input name="transaction_id" placeholder="TXN-XXXXXXXX" required></label><label>Condition on return<select name="condition"><option>Good</option><option>Damaged</option><option>Not working</option><option>Incomplete</option></select></label><label>Inspection notes<textarea name="notes" placeholder="Describe any visible issue or missing parts"></textarea></label><button class="primary-button full" type="submit">Save return record →</button></form></div></div>
 <div class="modal-backdrop" id="reserve-modal"><div class="modal"><button class="close" onclick="closeModal('reserve-modal')">×</button><div class="eyebrow">RESERVATION REQUEST</div><h2>Join the queue</h2><p class="modal-sub">Request an item that is currently unavailable.</p>
 <form id="reserve-form"><label>Student / staff ID<input name="user_code" required placeholder="Enter USN or staff ID"></label><label>Equipment<select name="item_id" id="reserve-item" required></select></label><label>Purpose<textarea name="purpose" required placeholder="Why do you need this equipment?"></textarea></label><button class="primary-button full" type="submit">Submit request →</button></form></div></div>
+
+<!-- CREATE USER MODAL -->
+<div class="modal-backdrop" id="user-modal">
+    <div class="modal">
+
+        <button class="close" onclick="closeModal('user-modal')">×</button>
+
+        <div class="eyebrow">USER MANAGEMENT</div>
+        <h2>Create User Account</h2>
+
+        <p class="modal-sub">
+            Register a new student or staff member.
+        </p>
+
+        <form id="user-form">
+
+            <label>
+                Full Name
+                <input name="full_name" placeholder="Enter full name" required>
+            </label>
+
+            <label>
+                USN / Staff ID
+                <input name="user_code" placeholder="Enter USN or Staff ID" required>
+            </label>
+
+            <label>
+                Email Address
+                <input type="email" name="email" placeholder="Enter email" required>
+            </label>
+
+            <label>
+                Role
+                <select name="role" required>
+                    <option value="Student">Student</option>
+                    <option value="Staff">Staff</option>
+                </select>
+            </label>
+
+            <label>Department
+              <select name="department" required>
+                <option value="">Select Department</option>
+                <option value="CSE">Computer Science and Engineering (CSE)</option>
+                <option value="ISE">Information Science and Engineering (ISE)</option>
+                <option value="ECE">Electronics and Communication Engineering (ECE)</option>
+                <option value="EEE">Electrical and Electronics Engineering (EEE)</option>
+                <option value="ME">Mechanical Engineering (ME)</option>
+                <option value="CV">Civil Engineering (CV)</option>
+                <option value="AI">Artificial Intelligence and Machine Learning (AI)</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+
+            <button class="primary-button full" type="submit">
+                Create Account →
+            </button>
+
+        </form>
+    </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script></body></html>
