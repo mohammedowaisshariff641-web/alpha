@@ -1,31 +1,67 @@
+
+// =========================================================
+// BORROW BOARD - MAIN JAVASCRIPT
+// =========================================================
+
 let state = {
     inventory: [],
     transactions: [],
     reservations: [],
     users: [],
-    stats: {}
+    stats: {},
+    currentUser: {
+        user_id: "",
+        role: "",
+        username: ""
+    }
 };
+
+
+// =========================================================
+// BASIC HELPERS
+// =========================================================
 
 const $ = id => document.getElementById(id);
 
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-}[c]));
+const esc = value =>
+    String(value ?? "").replace(/[&<>"']/g, character => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    }[character]));
 
-const itemById = id => state.inventory.find(i => i.Item_ID === id);
+function normalize(value) {
+    return String(value ?? "").trim().toLowerCase();
+}
 
-function toast(msg) {
-    const el = $("toast");
-    if (!el) return;
+function itemById(id) {
+    return state.inventory.find(
+        item => normalize(item.Item_ID) === normalize(id)
+    );
+}
 
-    el.textContent = msg;
-    el.classList.add("show");
+function userByCode(code) {
+    return state.users.find(user =>
+        normalize(user.USN_or_Staff_ID) === normalize(code)
+    );
+}
 
-    setTimeout(() => el.classList.remove("show"), 3200);
+function toast(message) {
+    const element = $("toast");
+
+    if (!element) {
+        alert(message);
+        return;
+    }
+
+    element.textContent = message;
+    element.classList.add("show");
+
+    setTimeout(() => {
+        element.classList.remove("show");
+    }, 3200);
 }
 
 function openModal(id) {
@@ -37,9 +73,37 @@ function closeModal(id) {
 }
 
 
-// ===== NAVIGATION =====
+// =========================================================
+// ROLE HELPERS
+// =========================================================
+
+function getRole() {
+    return normalize(state.currentUser.role);
+}
+
+function isAdmin() {
+    return getRole() === "admin";
+}
+
+function isStaff() {
+    return getRole() === "staff";
+}
+
+function isStudent() {
+    return getRole() === "student";
+}
+
+
+// =========================================================
+// NAVIGATION
+// =========================================================
 
 function switchView(view) {
+    if (view === "users" && !isAdmin()) {
+        toast("You do not have permission to access this page.");
+        return;
+    }
+
     const targetView = $(view + "-view");
 
     if (!targetView) {
@@ -47,19 +111,25 @@ function switchView(view) {
         return;
     }
 
-    document.querySelectorAll(".view").forEach(v => {
-        v.classList.remove("active");
+    document.querySelectorAll(".view").forEach(element => {
+        element.classList.remove("active");
     });
 
     targetView.classList.add("active");
 
-    // Only actual navigation buttons should be selected.
-    document.querySelectorAll(".nav-link[data-view]").forEach(b => {
-        b.classList.toggle("active", b.dataset.view === view);
+    document.querySelectorAll(".nav-link[data-view]").forEach(button => {
+        button.classList.toggle(
+            "active",
+            button.dataset.view === view
+        );
     });
 
-    $("crumb-name").textContent =
-        view.charAt(0).toUpperCase() + view.slice(1);
+    const breadcrumb = $("crumb-name");
+
+    if (breadcrumb) {
+        breadcrumb.textContent =
+            view.charAt(0).toUpperCase() + view.slice(1);
+    }
 
     const titles = {
         overview: 'Good afternoon<span class="accent">.</span>',
@@ -69,74 +139,217 @@ function switchView(view) {
         users: 'User management<span class="accent">.</span>'
     };
 
-    $("page-title").innerHTML = titles[view] || view;
+    const pageTitle = $("page-title");
+
+    if (pageTitle) {
+        pageTitle.innerHTML = titles[view] || view;
+    }
 }
 
-// FIX: Exclude Logout and other buttons without data-view.
-document.querySelectorAll(".nav-link[data-view]").forEach(b => {
-    b.addEventListener("click", () => switchView(b.dataset.view));
+document.querySelectorAll(".nav-link[data-view]").forEach(button => {
+    button.addEventListener("click", () => {
+        switchView(button.dataset.view);
+    });
 });
 
 
-// ===== API CONNECTION =====
+// =========================================================
+// API
+// =========================================================
 
-async function api(path, opts = {}) {
-    const r = await fetch(path, {
+async function api(path, options = {}) {
+    const requestOptions = {
+        ...options,
         headers: {
-            "Content-Type": "application/json",
-            ...(opts.headers || {})
-        },
-        ...opts
-    });
+            ...(options.body ? {
+                "Content-Type": "application/json"
+            } : {}),
+            ...(options.headers || {})
+        }
+    };
 
-    const data = await r.json();
+    const response = await fetch(path, requestOptions);
 
-    if (!r.ok) {
-        throw new Error(data.error || "Something went wrong");
+    let data = {};
+
+    try {
+        data = await response.json();
+    } catch (error) {
+        if (!response.ok) {
+            throw new Error(`Server error (${response.status})`);
+        }
+    }
+
+    if (!response.ok) {
+        throw new Error(
+            data.error || `Request failed (${response.status})`
+        );
     }
 
     return data;
 }
 
 
-// ===== LOAD DASHBOARD DATA =====
+// =========================================================
+// ROLE-BASED UI VISIBILITY
+// =========================================================
+
+function updateRoleControls() {
+    const role = getRole();
+
+    // Users page is Admin only.
+    const usersButton = document.querySelector(
+        '[data-view="users"]'
+    );
+
+    if (usersButton) {
+        usersButton.style.display =
+            role === "admin" ? "" : "none";
+    }
+
+    const usersView = $("users-view");
+
+    if (usersView && role !== "admin") {
+        usersView.style.display = "none";
+    }
+
+    // Hide borrowing and return actions from Students.
+    document.querySelectorAll(
+        '[onclick*="borrow-modal"], [onclick*="return-modal"]'
+    ).forEach(button => {
+        button.style.display =
+            role === "student" ? "none" : "";
+    });
+
+    // Hide user creation actions from Staff and Students.
+    document.querySelectorAll(
+        '[onclick*="user-modal"]'
+    ).forEach(button => {
+        button.style.display =
+            role === "admin" ? "" : "none";
+    });
+
+    // Also hide buttons based on their visible labels.
+    document.querySelectorAll("button").forEach(button => {
+        const label = normalize(button.textContent);
+
+        if (
+            label.includes("new checkout") ||
+            label.includes("record return")
+        ) {
+            button.style.display =
+                role === "student" ? "none" : "";
+        }
+
+        if (
+            label.includes("create user account")
+        ) {
+            button.style.display =
+                role === "admin" ? "" : "none";
+        }
+    });
+
+    // Students can request reservations.
+    const reserveButtons = document.querySelectorAll(
+        '[onclick*="reserve-modal"]'
+    );
+
+    reserveButtons.forEach(button => {
+        button.style.display = "";
+    });
+}
+
+
+// =========================================================
+// LOAD DATA
+// =========================================================
 
 async function loadData() {
     const start = performance.now();
 
     try {
-        state = await api("/api/bootstrap");
+        const data = await api("/api/bootstrap");
+
+        state = {
+            ...state,
+
+            inventory: Array.isArray(data.inventory)
+                ? data.inventory
+                : [],
+
+            transactions: Array.isArray(data.transactions)
+                ? data.transactions
+                : [],
+
+            reservations: Array.isArray(data.reservations)
+                ? data.reservations
+                : [],
+
+            users: Array.isArray(data.users)
+                ? data.users
+                : [],
+
+            stats: data.stats || {},
+
+            currentUser: {
+                user_id: data.current_user?.user_id ||
+                    state.currentUser.user_id,
+
+                username: data.current_user?.username ||
+                    state.currentUser.username,
+
+                role: data.current_user?.role ||
+                    state.currentUser.role
+            }
+        };
 
         console.log(
-            "Dashboard data loading:",
+            "Dashboard data loaded in:",
             ((performance.now() - start) / 1000).toFixed(3),
             "seconds"
         );
 
+        updateRoleControls();
         renderAll();
 
-        if ($("updated-at")) {
-            $("updated-at").textContent = "Updated just now";
+        const updatedAt = $("updated-at");
+
+        if (updatedAt) {
+            updatedAt.textContent = "Updated just now";
         }
 
         return true;
 
-    } catch (e) {
-        toast("Cannot load data: " + e.message);
+    } catch (error) {
+        console.error("LOAD DATA ERROR:", error);
+        toast("Cannot load data: " + error.message);
         return false;
     }
 }
 
 
-// ===== RENDER ALL =====
+// =========================================================
+// RENDER EVERYTHING
+// =========================================================
 
 function renderAll() {
-    const s = state.stats || {};
+    const stats = state.stats || {};
 
-    $("stat-items").textContent = s.items ?? 0;
-    $("stat-available").textContent = s.available ?? 0;
-    $("stat-active").textContent = s.active_loans ?? 0;
-    $("stat-overdue").textContent = s.overdue ?? 0;
+    if ($("stat-items")) {
+        $("stat-items").textContent = stats.items ?? 0;
+    }
+
+    if ($("stat-available")) {
+        $("stat-available").textContent = stats.available ?? 0;
+    }
+
+    if ($("stat-active")) {
+        $("stat-active").textContent = stats.active_loans ?? 0;
+    }
+
+    if ($("stat-overdue")) {
+        $("stat-overdue").textContent = stats.overdue ?? 0;
+    }
 
     renderFeatured();
     renderInventory();
@@ -148,164 +361,302 @@ function renderAll() {
 }
 
 
-// ===== FEATURED INVENTORY =====
+// =========================================================
+// FEATURED INVENTORY
+// =========================================================
 
 function renderFeatured() {
+    const container = $("featured-inventory");
+
+    if (!container) return;
+
     const items = state.inventory.slice(0, 4);
 
-    $("featured-inventory").innerHTML = items.length
-        ? items.map(i => `
-            <div class="inventory-row">
-                <div class="item-symbol">▦</div>
-                <div class="item-main">
-                    <b>${esc(i.Item_Name)}</b>
-                    <small>${esc(i.Item_ID)} · ${esc(i.Category)}</small>
-                </div>
-                <div class="availability">
-                    <b>${esc(i.Available_Quantity)} / ${esc(i.Total_Quantity)}</b>
-                    <small>units available</small>
-                </div>
+    if (!items.length) {
+        container.innerHTML =
+            '<div class="empty-state">No inventory has been added yet.</div>';
+        return;
+    }
+
+    container.innerHTML = items.map(item => `
+        <div class="inventory-row">
+            <div class="item-symbol">▦</div>
+
+            <div class="item-main">
+                <b>${esc(item.Item_Name)}</b>
+                <small>
+                    ${esc(item.Item_ID)} · ${esc(item.Category)}
+                </small>
             </div>
-        `).join("")
-        : '<div class="empty-state">No inventory has been added yet.</div>';
+
+            <div class="availability">
+                <b>
+                    ${esc(item.Available_Quantity)}
+                    /
+                    ${esc(item.Total_Quantity)}
+                </b>
+                <small>units available</small>
+            </div>
+        </div>
+    `).join("");
 }
 
 
-// ===== INVENTORY =====
+// =========================================================
+// INVENTORY TABLE
+// =========================================================
 
 function renderInventory() {
-    const q = ($("inventory-search")?.value || "").toLowerCase();
+    const table = $("inventory-table");
 
-    const rows = state.inventory.filter(i =>
-        [i.Item_Name, i.Item_ID, i.Category]
-            .join(" ")
-            .toLowerCase()
-            .includes(q)
-    );
+    if (!table) return;
 
-    $("inventory-count").textContent = rows.length + " items";
+    const search = normalize($("inventory-search")?.value);
 
-    $("inventory-table").innerHTML = rows.length
-        ? rows.map(i => `
+    const rows = state.inventory.filter(item => {
+        return [
+            item.Item_Name,
+            item.Item_ID,
+            item.Category
+        ].join(" ").toLowerCase().includes(search);
+    });
+
+    if ($("inventory-count")) {
+        $("inventory-count").textContent = rows.length + " items";
+    }
+
+    if (!rows.length) {
+        table.innerHTML = `
             <tr>
-                <td>
-                    <div class="equipment-cell">
-                        <div class="item-symbol">▦</div>
-                        <div>
-                            <b>${esc(i.Item_Name)}</b><br>
-                            <small>${esc(i.Item_ID)}</small>
-                        </div>
-                    </div>
-                </td>
-                <td>${esc(i.Category)}</td>
-                <td><b>${esc(i.Available_Quantity)}</b> / ${esc(i.Total_Quantity)}</td>
-                <td>${esc(i.Borrowed_Quantity)}</td>
-                <td>${esc(i.Condition)}</td>
-                <td>
-                    <span class="status ${i.Item_Status !== "Available" ? "warn" : ""}">
-                        ${esc(i.Item_Status)}
-                    </span>
+                <td colspan="6" class="empty-state">
+                    No matching equipment found.
                 </td>
             </tr>
-        `).join("")
-        : '<tr><td colspan="6" class="empty-state">No matching equipment found.</td></tr>';
+        `;
+        return;
+    }
+
+    table.innerHTML = rows.map(item => `
+        <tr>
+            <td>
+                <div class="equipment-cell">
+                    <div class="item-symbol">▦</div>
+                    <div>
+                        <b>${esc(item.Item_Name)}</b>
+                        <br>
+                        <small>${esc(item.Item_ID)}</small>
+                    </div>
+                </div>
+            </td>
+
+            <td>${esc(item.Category)}</td>
+
+            <td>
+                <b>${esc(item.Available_Quantity)}</b>
+                / ${esc(item.Total_Quantity)}
+            </td>
+
+            <td>${esc(item.Borrowed_Quantity)}</td>
+
+            <td>${esc(item.Condition)}</td>
+
+            <td>
+                <span class="status ${
+                    item.Item_Status !== "Available" ? "warn" : ""
+                }">
+                    ${esc(item.Item_Status)}
+                </span>
+            </td>
+        </tr>
+    `).join("");
 }
 
 
-// ===== BORROWING RECORDS =====
+// =========================================================
+// BORROWING TABLE
+// =========================================================
 
 function renderBorrowings() {
-    const q = ($("borrowing-search")?.value || "").toLowerCase();
+    const table = $("borrowing-table");
+
+    if (!table) return;
+
+    const search = normalize($("borrowing-search")?.value);
 
     const rows = [...state.transactions]
         .reverse()
-        .filter(t =>
-            [t.Transaction_ID, t.Item_ID, t.User_ID]
-                .join(" ")
-                .toLowerCase()
-                .includes(q)
-        );
+        .filter(transaction => {
+            return [
+                transaction.Transaction_ID,
+                transaction.Item_ID,
+                transaction.User_ID
+            ].join(" ").toLowerCase().includes(search);
+        });
 
-    $("borrowing-table").innerHTML = rows.length
-        ? rows.map(t => {
-            const item = itemById(t.Item_ID);
-
-            const overdue =
-                t.Transaction_Status === "Borrowed" &&
-                t.Due_Date < new Date().toISOString().slice(0, 10);
-
-            return `
-                <tr>
-                    <td><b>${esc(t.Transaction_ID)}</b></td>
-                    <td>${esc(t.User_ID)}</td>
-                    <td>${esc(item?.Item_Name || t.Item_ID)}</td>
-                    <td>${esc(t.Issue_Date)}</td>
-                    <td>${esc(t.Due_Date)}</td>
-                    <td>
-                        <span class="status ${overdue || t.Transaction_Status.includes("Inspection") ? "warn" : ""}">
-                            ${overdue ? "Overdue" : esc(t.Transaction_Status)}
-                        </span>
-                    </td>
-                </tr>
-            `;
-        }).join("")
-        : '<tr><td colspan="6" class="empty-state">No borrowing records yet.</td></tr>';
-}
-
-
-// ===== RESERVATIONS =====
-
-function renderReservations() {
-    $("reservation-table").innerHTML = state.reservations.length
-        ? [...state.reservations].reverse().map(r => `
+    if (!rows.length) {
+        table.innerHTML = `
             <tr>
-                <td><b>${esc(r.Reservation_ID)}</b></td>
-                <td>${esc(r.User_ID)}</td>
-                <td>${esc(r.Item_ID)}</td>
-                <td>${esc(r.Request_Date)}</td>
-                <td>#${esc(r.Priority_Number)}</td>
-                <td>
-                    <span class="status neutral">${esc(r.Reservation_Status)}</span>
+                <td colspan="6" class="empty-state">
+                    No borrowing records yet.
                 </td>
             </tr>
-        `).join("")
-        : '<tr><td colspan="6" class="empty-state">No reservation requests yet.</td></tr>';
+        `;
+        return;
+    }
+
+    table.innerHTML = rows.map(transaction => {
+        const item = itemById(transaction.Item_ID);
+
+        const dueDate = String(transaction.Due_Date || "");
+        const today = new Date().toISOString().slice(0, 10);
+
+        const overdue =
+            normalize(transaction.Transaction_Status) === "borrowed" &&
+            dueDate &&
+            dueDate < today;
+
+        const inspection =
+            String(transaction.Transaction_Status || "")
+                .includes("Inspection");
+
+        return `
+            <tr>
+                <td>
+                    <b>${esc(transaction.Transaction_ID)}</b>
+                </td>
+
+                <td>${esc(transaction.User_ID)}</td>
+
+                <td>
+                    ${esc(item?.Item_Name || transaction.Item_ID)}
+                </td>
+
+                <td>${esc(transaction.Issue_Date)}</td>
+
+                <td>${esc(transaction.Due_Date)}</td>
+
+                <td>
+                    <span class="status ${
+                        overdue || inspection ? "warn" : ""
+                    }">
+                        ${
+                            overdue
+                                ? "Overdue"
+                                : esc(transaction.Transaction_Status)
+                        }
+                    </span>
+                </td>
+            </tr>
+        `;
+    }).join("");
 }
 
 
-// ===== RECENT ACTIVITY =====
+// =========================================================
+// RESERVATIONS
+// =========================================================
+
+function renderReservations() {
+    const table = $("reservation-table");
+
+    if (!table) return;
+
+    if (!state.reservations.length) {
+        table.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    No reservation requests yet.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    table.innerHTML = [...state.reservations]
+        .reverse()
+        .map(reservation => `
+            <tr>
+                <td>
+                    <b>${esc(reservation.Reservation_ID)}</b>
+                </td>
+
+                <td>${esc(reservation.User_ID)}</td>
+
+                <td>${esc(reservation.Item_ID)}</td>
+
+                <td>${esc(reservation.Request_Date)}</td>
+
+                <td>#${esc(reservation.Priority_Number)}</td>
+
+                <td>
+                    <span class="status neutral">
+                        ${esc(reservation.Reservation_Status)}
+                    </span>
+                </td>
+            </tr>
+        `).join("");
+}
+
+
+// =========================================================
+// RECENT ACTIVITY
+// =========================================================
 
 function renderActivity() {
+    const container = $("recent-activity");
+
+    if (!container) return;
+
     const rows = [...state.transactions].slice(-5).reverse();
 
-    $("recent-activity").innerHTML = rows.length
-        ? rows.map(t => `
-            <div class="activity-row">
-                <div class="activity-mark">${t.Return_Date ? "↩" : "↗"}</div>
-                <div class="activity-copy">
-                    <b>${esc(t.User_ID)}</b>
-                    ${t.Return_Date ? "returned" : "borrowed"}
-                    <b>${esc(itemById(t.Item_ID)?.Item_Name || t.Item_ID)}</b>
-                    <small>
-                        ${esc(t.Return_Date || t.Issue_Date)}
-                        · ${esc(t.Transaction_Status)}
-                    </small>
-                </div>
+    if (!rows.length) {
+        container.innerHTML =
+            '<div class="empty-state">Activity will appear here after the first checkout.</div>';
+        return;
+    }
+
+    container.innerHTML = rows.map(transaction => `
+        <div class="activity-row">
+            <div class="activity-mark">
+                ${transaction.Return_Date ? "↩" : "↗"}
             </div>
-        `).join("")
-        : '<div class="empty-state">Activity will appear here after the first checkout.</div>';
+
+            <div class="activity-copy">
+                <b>${esc(transaction.User_ID)}</b>
+                ${transaction.Return_Date ? "returned" : "borrowed"}
+
+                <b>
+                    ${esc(
+                        itemById(transaction.Item_ID)?.Item_Name ||
+                        transaction.Item_ID
+                    )}
+                </b>
+
+                <small>
+                    ${esc(
+                        transaction.Return_Date ||
+                        transaction.Issue_Date
+                    )}
+                    ·
+                    ${esc(transaction.Transaction_Status)}
+                </small>
+            </div>
+        </div>
+    `).join("");
 }
 
 
-// ===== REGISTERED USERS =====
+// =========================================================
+// USERS
+// =========================================================
 
 function renderUsers() {
-    const tbody = $("users-table");
+    const table = $("users-table");
 
-    if (!tbody) return;
+    if (!table || !isAdmin()) return;
 
-    if (!state.users || state.users.length === 0) {
-        tbody.innerHTML = `
+    if (!state.users.length) {
+        table.innerHTML = `
             <tr>
                 <td colspan="5">No registered users found.</td>
             </tr>
@@ -313,289 +664,717 @@ function renderUsers() {
         return;
     }
 
-    tbody.innerHTML = state.users.map(user => `
+    table.innerHTML = state.users.map(user => `
         <tr>
             <td>${esc(user.Full_Name)}</td>
             <td>${esc(user.USN_or_Staff_ID)}</td>
-            <td>${esc(user.Email)}</td>
+            <td>${esc(user.Email || "")}</td>
             <td>${esc(user.Role)}</td>
-            <td>${esc(user.Account_Status)}</td>
+            <td>${esc(user.Account_Status || "Active")}</td>
         </tr>
     `).join("");
 }
 
 
-// ===== POPULATE ITEM DROPDOWNS =====
+// =========================================================
+// POPULATE BORROW / RESERVATION SELECTS
+// =========================================================
 
 function populateSelects() {
-    ["borrow-item", "reserve-item"].forEach(id => {
-        const element = $(id);
+    const borrowerSelect = $("borrow-user");
 
-        if (!element) return;
+    if (borrowerSelect) {
+        borrowerSelect.innerHTML =
+            '<option value="">Select borrower</option>';
 
-        element.innerHTML = state.inventory.map(i => `
-            <option value="${esc(i.Item_ID)}">
-                ${esc(i.Item_Name)} · ${esc(i.Available_Quantity)} available
-            </option>
-        `).join("");
-    });
+        state.users
+            .filter(user =>
+                normalize(user.Account_Status || "Active") === "active"
+            )
+            .forEach(user => {
+                const option = document.createElement("option");
+
+                option.value = user.USN_or_Staff_ID;
+                option.textContent =
+                    `${user.USN_or_Staff_ID} - ${user.Full_Name || "User"}`;
+
+                borrowerSelect.appendChild(option);
+            });
+    }
+
+    const reserveUserSelect = $("reserve-user");
+
+    if (reserveUserSelect) {
+        reserveUserSelect.innerHTML =
+            '<option value="">Select borrower</option>';
+
+        if (isStudent()) {
+            const option = document.createElement("option");
+
+            option.value = state.currentUser.user_id;
+            option.textContent = state.currentUser.user_id;
+            option.selected = true;
+
+            reserveUserSelect.appendChild(option);
+            reserveUserSelect.disabled = true;
+
+        } else {
+            reserveUserSelect.disabled = false;
+
+            state.users
+                .filter(user =>
+                    normalize(user.Account_Status || "Active") === "active"
+                )
+                .forEach(user => {
+                    const option = document.createElement("option");
+
+                    option.value = user.USN_or_Staff_ID;
+                    option.textContent =
+                        `${user.USN_or_Staff_ID} - ${user.Full_Name || "User"}`;
+
+                    reserveUserSelect.appendChild(option);
+                });
+        }
+    }
+
+    const borrowItemSelect = $("borrow-item");
+
+    if (borrowItemSelect) {
+        borrowItemSelect.innerHTML =
+            '<option value="">Select equipment</option>';
+
+        state.inventory
+            .filter(item => Number(item.Available_Quantity || 0) > 0)
+            .forEach(item => {
+                const option = document.createElement("option");
+
+                option.value = item.Item_ID;
+                option.textContent =
+                    `${item.Item_Name} - ${item.Item_ID} (${item.Available_Quantity} available)`;
+
+                borrowItemSelect.appendChild(option);
+            });
+    }
+
+    const reserveItemSelect = $("reserve-item");
+
+    if (reserveItemSelect) {
+        reserveItemSelect.innerHTML =
+            '<option value="">Select equipment</option>';
+
+        state.inventory.forEach(item => {
+            const option = document.createElement("option");
+
+            option.value = item.Item_ID;
+            option.textContent = `${item.Item_Name} - ${item.Item_ID}`;
+
+            reserveItemSelect.appendChild(option);
+        });
+    }
+
+    const returnSelect = $("return-transaction");
+
+    if (returnSelect) {
+        returnSelect.innerHTML =
+            '<option value="">Select active borrowing</option>';
+
+        state.transactions
+            .filter(transaction => {
+                const status = normalize(transaction.Transaction_Status);
+
+                return status === "borrowed" || status === "overdue";
+            })
+            .forEach(transaction => {
+                const item = itemById(transaction.Item_ID);
+
+                const option = document.createElement("option");
+
+                option.value = transaction.Transaction_ID;
+                option.textContent =
+                    `${transaction.Transaction_ID} - ${transaction.User_ID} - ${item?.Item_Name || transaction.Item_ID}`;
+
+                returnSelect.appendChild(option);
+            });
+    }
 }
 
 
-// ===== FORM HELPER =====
+// =========================================================
+// FORM HELPER
+// =========================================================
 
 function formObject(form) {
     return Object.fromEntries(new FormData(form).entries());
 }
 
 
-// ===== BORROW EQUIPMENT =====
+// =========================================================
+// BORROW EQUIPMENT - ADMIN AND STAFF
+// =========================================================
 
-$("borrow-form").addEventListener("submit", async e => {
-    e.preventDefault();
+const borrowForm = $("borrow-form");
 
-    try {
-        const d = formObject(e.target);
-        d.quantity = Number(d.quantity);
+if (borrowForm) {
+    borrowForm.addEventListener("submit", async event => {
+        event.preventDefault();
 
-        const r = await api("/api/borrow", {
-            method: "POST",
-            body: JSON.stringify(d)
-        });
+        if (isStudent()) {
+            toast("Students cannot directly borrow equipment.");
+            return;
+        }
 
-        toast(r.message + " ID: " + r.transaction_id);
+        try {
+            const data = formObject(event.target);
 
-        e.target.reset();
-        closeModal("borrow-modal");
+            data.user_code = String(data.user_code || "").trim();
+            data.item_id = String(data.item_id || "").trim();
+            data.purpose = String(data.purpose || "").trim();
+            data.due_date = String(data.due_date || "").trim();
+            data.quantity = Number(data.quantity || 1);
 
-        await loadData();
+            if (!data.user_code) {
+                toast("Please select a borrower.");
+                return;
+            }
 
-    } catch (err) {
-        toast(err.message);
-    }
-});
+            if (!data.item_id) {
+                toast("Please select equipment.");
+                return;
+            }
+
+            if (!data.purpose) {
+                toast("Please enter the purpose.");
+                return;
+            }
+
+            if (!data.due_date) {
+                toast("Please select the return date.");
+                return;
+            }
+
+            if (!Number.isInteger(data.quantity) || data.quantity < 1) {
+                toast("Quantity must be at least 1.");
+                return;
+            }
+
+            const selectedItem = itemById(data.item_id);
+
+            if (!selectedItem) {
+                toast("Selected equipment was not found.");
+                return;
+            }
+
+            const available = Number(selectedItem.Available_Quantity || 0);
+
+            if (data.quantity > available) {
+                toast(`Only ${available} unit(s) are available.`);
+                return;
+            }
+
+            const result = await api("/api/borrow", {
+                method: "POST",
+                body: JSON.stringify(data)
+            });
+
+            toast(
+                `${result.message} Transaction ID: ${result.transaction_id}`
+            );
+
+            event.target.reset();
+
+            if ($("borrow-quantity")) {
+                $("borrow-quantity").value = 1;
+            }
+
+            closeModal("borrow-modal");
+            await loadData();
+
+        } catch (error) {
+            console.error("BORROW ERROR:", error);
+            toast(error.message);
+        }
+    });
+}
 
 
-// ===== RETURN EQUIPMENT =====
+// =========================================================
+// RETURN EQUIPMENT - ADMIN AND STAFF
+// =========================================================
 
-$("return-form").addEventListener("submit", async e => {
-    e.preventDefault();
+const returnForm = $("return-form");
 
-    try {
-        const r = await api("/api/return", {
-            method: "POST",
-            body: JSON.stringify(formObject(e.target))
-        });
+if (returnForm) {
+    returnForm.addEventListener("submit", async event => {
+        event.preventDefault();
 
-        toast(r.message);
+        if (isStudent()) {
+            toast("Students cannot record equipment returns.");
+            return;
+        }
 
-        e.target.reset();
-        closeModal("return-modal");
+        try {
+            const data = formObject(event.target);
 
-        await loadData();
+            data.transaction_id =
+                String(data.transaction_id || "").trim();
 
-    } catch (err) {
-        toast(err.message);
-    }
-});
+            data.condition =
+                String(data.condition || "").trim();
+
+            if (!data.transaction_id) {
+                toast("Please select a borrowing transaction.");
+                return;
+            }
+
+            if (!data.condition) {
+                toast("Please select the return condition.");
+                return;
+            }
+
+            const result = await api("/api/return", {
+                method: "POST",
+                body: JSON.stringify(data)
+            });
+
+            toast(result.message);
+
+            event.target.reset();
+            closeModal("return-modal");
+
+            await loadData();
+
+        } catch (error) {
+            console.error("RETURN ERROR:", error);
+            toast(error.message);
+        }
+    });
+}
 
 
-// ===== RESERVE EQUIPMENT =====
+// =========================================================
+// RESERVATION - ALL ROLES
+// =========================================================
 
-$("reserve-form").addEventListener("submit", async e => {
-    e.preventDefault();
+const reserveForm = $("reserve-form");
 
-    try {
-        const r = await api("/api/reservations", {
-            method: "POST",
-            body: JSON.stringify(formObject(e.target))
-        });
+if (reserveForm) {
+    reserveForm.addEventListener("submit", async event => {
+        event.preventDefault();
 
-        toast(r.message);
+        try {
+            const data = formObject(event.target);
 
-        e.target.reset();
-        closeModal("reserve-modal");
+            // Students can reserve only for themselves.
+            if (isStudent()) {
+                data.user_code = state.currentUser.user_id;
+            } else {
+                data.user_code = String(data.user_code || "").trim();
+            }
 
-        await loadData();
+            data.item_id = String(data.item_id || "").trim();
+            data.purpose = String(data.purpose || "").trim();
+            data.quantity = Number(data.quantity || 1);
 
-    } catch (err) {
-        toast(err.message);
-    }
-});
+            if (!data.user_code) {
+                toast("Please select a borrower.");
+                return;
+            }
+
+            if (!data.item_id) {
+                toast("Please select equipment.");
+                return;
+            }
+
+            if (!data.purpose) {
+                toast("Please enter the purpose.");
+                return;
+            }
+
+            const result = await api("/api/reservations", {
+                method: "POST",
+                body: JSON.stringify(data)
+            });
+
+            toast(
+                `${result.message} ID: ${result.reservation_id}`
+            );
+
+            event.target.reset();
+            closeModal("reserve-modal");
+
+            await loadData();
+
+        } catch (error) {
+            console.error("RESERVATION ERROR:", error);
+            toast(error.message);
+        }
+    });
+}
 
 
-// ===== MODAL HANDLING =====
+// =========================================================
+// MODAL BACKDROP
+// =========================================================
 
-document.querySelectorAll(".modal-backdrop").forEach(m => {
-    m.addEventListener("click", e => {
-        if (e.target === m) {
-            m.classList.remove("show");
+document.querySelectorAll(".modal-backdrop").forEach(modal => {
+    modal.addEventListener("click", event => {
+        if (event.target === modal) {
+            modal.classList.remove("show");
         }
     });
 });
 
 
-// ===== DUE DATE DEFAULT =====
+// =========================================================
+// DEFAULT DUE DATE
+// =========================================================
 
-const today = new Date();
+function setupDueDate() {
+    const dateInput = $("due-date");
 
-$("due-date").min = today.toISOString().slice(0, 10);
+    if (!dateInput) return;
 
-const due = new Date();
-due.setDate(due.getDate() + 3);
+    const today = new Date();
+    const todayString = today.toISOString().slice(0, 10);
 
-$("due-date").value = due.toISOString().slice(0, 10);
+    dateInput.min = todayString;
+
+    const defaultDueDate = new Date();
+    defaultDueDate.setDate(defaultDueDate.getDate() + 3);
+
+    dateInput.value = defaultDueDate.toISOString().slice(0, 10);
+}
+
+setupDueDate();
 
 
-// ===== LOGIN AND SESSION MANAGEMENT =====
+// =========================================================
+// SEARCH
+// =========================================================
+
+const inventorySearch = $("inventory-search");
+
+if (inventorySearch) {
+    inventorySearch.addEventListener("input", renderInventory);
+}
+
+const borrowingSearch = $("borrowing-search");
+
+if (borrowingSearch) {
+    borrowingSearch.addEventListener("input", renderBorrowings);
+}
+
+
+// =========================================================
+// LOGIN / DASHBOARD
+// =========================================================
 
 const loginScreen = $("login-screen");
 const appShell = document.querySelector(".app-shell");
 
-// Hide dashboard until login is verified.
-appShell.style.display = "none";
-
-
-function showLogin() {
-    loginScreen.classList.add("active");
+if (appShell) {
     appShell.style.display = "none";
 }
 
+function showLogin() {
+    if (loginScreen) {
+        loginScreen.classList.add("active");
+    }
+
+    if (appShell) {
+        appShell.style.display = "none";
+    }
+}
 
 function showDashboard() {
-    loginScreen.classList.remove("active");
-    appShell.style.display = "";
+    if (loginScreen) {
+        loginScreen.classList.remove("active");
+    }
+
+    if (appShell) {
+        appShell.style.display = "";
+    }
 }
 
 
-// ===== LOGIN FORM =====
+// =========================================================
+// LOGIN
+// =========================================================
 
-$("login-form").addEventListener("submit", async function(e) {
-    e.preventDefault();
+const loginForm = $("login-form");
 
-    const errorBox = $("login-error");
-    errorBox.classList.remove("show");
+if (loginForm) {
+    loginForm.addEventListener("submit", async event => {
+        event.preventDefault();
 
-    try {
-        const result = await api("/api/login", {
-            method: "POST",
-            body: JSON.stringify({
-                username: $("login-username").value.trim(),
-                password: $("login-password").value
-            })
-        });
+        const errorBox = $("login-error");
 
-        // Check the role returned by Flask
-        const role = (result.role || "").trim().toLowerCase();
-
-        // Show or hide Manage Users
-        const manageUsersButton = document.querySelector(
-            '[data-view="users"]'
-        );
-
-        if (manageUsersButton) {
-            manageUsersButton.style.display =
-                role === "admin" ? "" : "none";
+        if (errorBox) {
+            errorBox.classList.remove("show");
         }
 
-        showDashboard();
+        try {
+            const result = await api("/api/login", {
+                method: "POST",
+                body: JSON.stringify({
+                    username: $("login-username")?.value?.trim(),
+                    password: $("login-password")?.value
+                })
+            });
 
-        const loaded = await loadData();
+            state.currentUser = {
+                user_id: result.user_id || "",
+                role: result.role || "",
+                username: result.username || ""
+            };
 
-        if (!loaded) {
-            showLogin();
-            return;
+            showDashboard();
+
+            const loaded = await loadData();
+
+            if (!loaded) {
+                showLogin();
+                return;
+            }
+
+            switchView("overview");
+
+            toast("Welcome, " + (result.username || "User"));
+
+        } catch (error) {
+            if (errorBox) {
+                errorBox.textContent = error.message;
+                errorBox.classList.add("show");
+            } else {
+                toast(error.message);
+            }
         }
-
-        toast("Welcome, " + result.username);
-
-    } catch (error) {
-        errorBox.textContent = error.message;
-        errorBox.classList.add("show");
-    }
-});
+    });
+}
 
 
-// ===== CHECK EXISTING SESSION =====
+// =========================================================
+// SESSION CHECK
+// =========================================================
 
 async function initializeAuth() {
     try {
         const result = await api("/api/session");
 
         if (result.logged_in) {
+            state.currentUser = {
+                user_id: result.user_id || "",
+                role: result.role || "",
+                username: result.username || ""
+            };
+
             showDashboard();
+
             const loaded = await loadData();
 
             if (!loaded) {
                 showLogin();
+                return;
             }
 
+            switchView("overview");
+
         } else {
+            state.currentUser = {
+                user_id: "",
+                role: "",
+                username: ""
+            };
+
             showLogin();
         }
 
     } catch (error) {
+        console.error("SESSION CHECK ERROR:", error);
         showLogin();
     }
 }
 
+
+// =========================================================
+// LOGOUT
+// =========================================================
+
+const logoutButton = $("logout-button");
+
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            await api("/api/logout", {
+                method: "POST"
+            });
+
+            state = {
+                inventory: [],
+                transactions: [],
+                reservations: [],
+                users: [],
+                stats: {},
+                currentUser: {
+                    user_id: "",
+                    role: "",
+                    username: ""
+                }
+            };
+
+            showLogin();
+
+            if (loginForm) {
+                loginForm.reset();
+            }
+
+            toast("Logged out successfully.");
+
+        } catch (error) {
+            toast("Logout failed: " + error.message);
+        }
+    });
+}
+
+
+// =========================================================
+// CREATE USER - ADMIN ONLY
+// =========================================================
+
+const userForm = $("user-form");
+
+if (userForm) {
+    userForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        if (!isAdmin()) {
+            toast("Only Admin can create user accounts.");
+            return;
+        }
+
+        const formData = new FormData(event.target);
+
+        const userData = {
+            full_name: formData.get("full_name"),
+            user_code: formData.get("user_code"),
+            email: formData.get("email"),
+            role: formData.get("role"),
+            department: formData.get("department")
+        };
+
+        try {
+            const result = await api("/api/admin/users", {
+                method: "POST",
+                body: JSON.stringify(userData)
+            });
+
+            alert(
+                "Account created successfully!\n\n" +
+                "Username: " + result.username +
+                "\nTemporary Password: " + result.temporary_password
+            );
+
+            closeModal("user-modal");
+            event.target.reset();
+
+            await loadData();
+
+        } catch (error) {
+            alert(error.message);
+        }
+    });
+}
+
+
+// =========================================================
+// CHANGE PASSWORD
+// =========================================================
+
+const changePasswordScreen = $("change-password-screen");
+
+function showChangePassword() {
+    if (loginScreen) {
+        loginScreen.classList.remove("active");
+    }
+
+    if (changePasswordScreen) {
+        changePasswordScreen.classList.add("active");
+    }
+
+    if (appShell) {
+        appShell.style.display = "none";
+    }
+}
+
+const changePasswordForm = $("change-password-form");
+
+if (changePasswordForm) {
+    changePasswordForm.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const errorBox = $("change-password-error");
+
+        if (errorBox) {
+            errorBox.classList.remove("show");
+        }
+
+        const currentPassword = $("current-password")?.value;
+        const newPassword = $("new-password")?.value;
+        const confirmPassword = $("confirm-password")?.value;
+
+        if (newPassword !== confirmPassword) {
+            const message = "New passwords do not match.";
+
+            if (errorBox) {
+                errorBox.textContent = message;
+                errorBox.classList.add("show");
+            } else {
+                toast(message);
+            }
+
+            return;
+        }
+
+        try {
+            const result = await api("/api/change-password", {
+                method: "POST",
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                    new_password: newPassword
+                })
+            });
+
+            event.target.reset();
+
+            if (changePasswordScreen) {
+                changePasswordScreen.classList.remove("active");
+            }
+
+            showDashboard();
+
+            const loaded = await loadData();
+
+            if (!loaded) {
+                showLogin();
+                return;
+            }
+
+            toast(result.message);
+
+        } catch (error) {
+            if (errorBox) {
+                errorBox.textContent = error.message;
+                errorBox.classList.add("show");
+            } else {
+                toast(error.message);
+            }
+        }
+    });
+}
+
+
+// =========================================================
+// START APPLICATION
+// =========================================================
+
 initializeAuth();
-
-
-// ===== LOGOUT =====
-
-$("logout-button").addEventListener("click", async function() {
-    try {
-        await api("/api/logout", {
-            method: "POST"
-        });
-
-        showLogin();
-
-        $("login-form").reset();
-
-        toast("Logged out successfully");
-
-    } catch (error) {
-        toast("Logout failed: " + error.message);
-    }
-});
-
-
-// ===== CREATE USER ACCOUNT =====
-
-$("user-form").addEventListener("submit", async function(e) {
-    e.preventDefault();
-
-    const formData = new FormData(this);
-
-    const userData = {
-        full_name: formData.get("full_name"),
-        user_code: formData.get("user_code"),
-        email: formData.get("email"),
-        role: formData.get("role"),
-        department: formData.get("department")
-    };
-
-    try {
-        const result = await api("/api/admin/users", {
-            method: "POST",
-            body: JSON.stringify(userData)
-        });
-
-        alert(
-            "Account created successfully!\n\n" +
-            "Username: " + result.username +
-            "\nTemporary Password: " + result.temporary_password
-        );
-
-        closeModal("user-modal");
-
-        this.reset();
-
-        await loadData();
-
-    } catch (error) {
-        alert(error.message);
-    }
-});
